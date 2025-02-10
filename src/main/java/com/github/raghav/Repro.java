@@ -23,19 +23,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.ColumnStatistics;
-import org.apache.hadoop.hive.metastore.api.ColumnStatisticsData;
-import org.apache.hadoop.hive.metastore.api.ColumnStatisticsDesc;
-import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
-import org.apache.hadoop.hive.metastore.api.FieldSchema;
-import org.apache.hadoop.hive.metastore.api.MetaException;
-import org.apache.hadoop.hive.metastore.api.SerDeInfo;
-import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
-import org.apache.hadoop.hive.metastore.api.StringColumnStatsData;
-import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.*;
+import org.apache.thrift.TException;
 
 public class Repro {
   private static final String DB_NAME = "test";
+  private static final String LOCATION = "/warehouse/tablespace/external/hive/" + DB_NAME + ".db/";
   private static final String TABLE_PREFIX = "test_table";
   private static final int THREAD_POOL_SIZE = 32;
 
@@ -71,7 +64,7 @@ public class Repro {
       if ("clear".equals(args[0])) {
         clearAll().get();
       } else {
-
+        createDatabase(DB_NAME);
         int count = Integer.parseInt(args[0]);
 
         ArrayList<CompletableFuture<?>> cfs = new ArrayList<>();
@@ -79,7 +72,7 @@ public class Repro {
           CompletableFuture<?> cf =
               createTable(i)
                   .thenComposeAsync(stats -> createStats(stats).thenApply(x -> stats), EXECUTOR);
-          //                  .thenComposeAsync(stats -> deleteTable(stats), EXECUTOR);
+          // .thenComposeAsync(stats -> deleteTable(stats), EXECUTOR);
           cfs.add(cf);
         }
 
@@ -106,6 +99,14 @@ public class Repro {
     return CompletableFuture.allOf(cfs.toArray(new CompletableFuture<?>[0]));
   }
 
+  private static void createDatabase(String dbName) throws TException {
+    Database db = new Database(dbName, "java created database", LOCATION, null);
+    HiveConf conf = new HiveConf();
+    conf.set("hive.metastore.uris", "thrift://localhost:9083");
+    HiveMetaStoreClient hms = new HiveMetaStoreClient(conf);
+    hms.createDatabase(db);
+  }
+
   private static CompletableFuture<TableCreated> createTable(int j) {
     String name = TABLE_PREFIX + "_" + j;
 
@@ -119,7 +120,7 @@ public class Repro {
           table.setTableType("EXTERNAL_TABLE");
 
           StorageDescriptor sd = new StorageDescriptor();
-          sd.setLocation("/warehouse/tablespace/external/hive/" + DB_NAME + ".db/" + name);
+          sd.setLocation(LOCATION + name);
           sd.setInputFormat("org.apache.hadoop.hive.ql.io.orc.OrcInputFormat");
           sd.setOutputFormat("org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat");
 
